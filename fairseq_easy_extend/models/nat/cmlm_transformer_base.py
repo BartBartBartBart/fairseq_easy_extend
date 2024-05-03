@@ -100,11 +100,9 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
         #can apply temp
         _scores =  torch.nn.functional.softmax(_scores/temperature,dim=-1)
 
-        ind = torch.multinomial(_scores,100)
+        ind = torch.multinomial(input=_scores,num_samples=100)
         _tokens = _tokens.gather(-1,ind).unsqueeze(-1)
         _scores = _scores.gather(-1,ind).squeeze(-1)
-        
-
 
 
     #    a smpledscoreidx = sampled_score.squeeze(-1)
