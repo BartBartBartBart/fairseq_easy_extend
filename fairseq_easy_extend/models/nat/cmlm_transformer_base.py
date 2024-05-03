@@ -91,18 +91,11 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
 
         # execute the decoder
         output_masks = output_tokens.eq(self.unk)
-        out = self.decoder(
+        _scores = self.decoder(
             normalize=True,
             prev_output_tokens=output_tokens,
             encoder_out=encoder_out,
         )
-        print(out)
-        _scores, _tokens = self.decoder(
-            normalize=True,
-            prev_output_tokens=output_tokens,
-            encoder_out=encoder_out,
-        ).max(-1)
-        print(_scores,_tokens)
 
         #can apply temp
         _scores =  torch.nn.functional.softmax(_scores/temperature,dim=-1)
