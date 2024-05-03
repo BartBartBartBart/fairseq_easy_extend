@@ -91,6 +91,12 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
 
         # execute the decoder
         output_masks = output_tokens.eq(self.unk)
+        out = self.decoder(
+            normalize=True,
+            prev_output_tokens=output_tokens,
+            encoder_out=encoder_out,
+        )
+        print(out)
         _scores, _tokens = self.decoder(
             normalize=True,
             prev_output_tokens=output_tokens,
@@ -103,7 +109,8 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
         ind = torch.multinomial(_scores,100)
         _tokens = _tokens.gather(-1,ind)
         _scores = _scores.gather(-1,ind)
-        
+
+
 
     #    a smpledscoreidx = sampled_score.squeeze(-1)
 
