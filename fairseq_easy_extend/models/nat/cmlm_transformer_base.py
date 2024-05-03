@@ -89,21 +89,37 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
         output_scores = decoder_out.output_scores
         history = decoder_out.history
 
-        # execute the decoder
+        # Execute decoder on the models, it returns logits for each token
         output_masks = output_tokens.eq(self.unk)
         _scores = self.decoder(
             normalize=True,
             prev_output_tokens=output_tokens,
             encoder_out=encoder_out,
         )
-
-        #can apply temp
-        _scores =  torch.nn.functional.softmax(_scores/temperature,dim=-1)
-
+        print(f" decoder output {_scores.shape}")
+        # Apply softmax with temp to get probabilities, 1x10x27612
+        # [batch size, number of tokens, vocab size] -> [1, 10, 27612]
+        _scores =  torch.nn.functional.softmax(_scores.squeeze()/temperature,dim=-1)
+        
+        print(f" decoder output after softmax {_scores.shape}")
+        # Sample 100 probabilities from the output
+        # [batch size, number of tokens, vocab size] -> [1, 10, 100]
         ind = torch.multinomial(input=_scores,num_samples=100)
-        _tokens = _tokens.gather(-1,ind).unsqueeze(-1)
+
+        print(f" decoder output after sampling {ind.shape}")
+        _tokens = ind
+        # _tokens = _tokens.gather(-1,ind).unsqueeze(-1)
         _scores = _scores.gather(-1,ind).squeeze(-1)
 
+        print(_tokens.shape)
+        print(_scores.shape)
+
+        return decoder_out._replace(
+            output_tokens=_tokens,
+            output_scores=_scores,
+            attn=None,
+            history=history,
+        )
 
     #    a smpledscoreidx = sampled_score.squeeze(-1)
 
@@ -112,8 +128,8 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
     #     _tokens = _tokens.squeeze(-1)
 
 
-        output_tokens.masked_scatter_(output_masks, _tokens[output_masks])
-        output_scores.masked_scatter_(output_masks, _scores[output_masks])
+        # output_tokens.masked_scatter_(output_masks, _tokens[output_masks])
+        # output_scores.masked_scatter_(output_masks, _scores[output_masks])
 
         if history is not None:
             history.append(output_tokens.clone())
