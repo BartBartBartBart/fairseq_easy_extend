@@ -101,7 +101,8 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
             normalize=True,
             prev_output_tokens=output_tokens,
             encoder_out=encoder_out,
-        )
+        ).max(-1)
+        print(_scores,_tokens)
 
         #can apply temp
         _scores =  torch.nn.functional.softmax(_scores/temperature,dim=-1)
