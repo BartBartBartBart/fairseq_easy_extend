@@ -54,6 +54,14 @@ class CMLMTransformerConfig(TransformerConfig):
     )
     label_smoothing: float = field(default=0.1, metadata={"help": "label smoothing"})
 
+def _skeptical_unmasking(output_scores, output_masks, p):
+    sorted_index = output_scores.sort(-1)[1]
+    boundary_len = (
+        (output_masks.sum(1, keepdim=True).type_as(output_scores) - 2) * p
+    ).long()
+    skeptical_mask = new_arange(output_masks) < boundary_len
+    return skeptical_mask.scatter(1, sorted_index, skeptical_mask)
+
 @register_model("cmlm_transformer_base", dataclass=CMLMTransformerConfig)
 class BaseCMLMNATransformerModel(CMLMNATransformerModel):
 
@@ -72,14 +80,6 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
         model = super().build_model(cfg, task)
         return model
     
-    def _skeptical_unmasking(output_scores, output_masks, p):
-        sorted_index = output_scores.sort(-1)[1]
-        boundary_len = (
-            (output_masks.sum(1, keepdim=True).type_as(output_scores) - 2) * p
-        ).long()
-        skeptical_mask = new_arange(output_masks) < boundary_len
-        return skeptical_mask.scatter(1, sorted_index, skeptical_mask)
-    
     def forward_decoder(self, decoder_out, encoder_out, temperature=1.2, decoding_format=None, **kwargs):
 
         step = decoder_out.step
@@ -96,23 +96,16 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
             prev_output_tokens=output_tokens,
             encoder_out=encoder_out,
         )
-        print(f" decoder output {_scores.shape}")
+
         # Apply softmax with temp to get probabilities, 1x10x27612
         # [batch size, number of tokens, vocab size] -> [1, 10, 27612]
         _scores =  torch.nn.functional.softmax(_scores.squeeze()/temperature,dim=-1)
-        
-        print(f" decoder output after softmax {_scores.shape}")
+
         # Sample 100 probabilities from the output
         # [batch size, number of tokens, vocab size] -> [1, 10, 100]
         ind = torch.multinomial(input=_scores,num_samples=100)
-
-        print(f" decoder output after sampling {ind.shape}")
-        _tokens = ind
-        # _tokens = _tokens.gather(-1,ind).unsqueeze(-1)
-        _scores = _scores.gather(-1,ind).squeeze(-1)
-
-        print(_tokens.shape)
-        print(_scores.shape)
+        _tokens = ind.unsqueeze(0)
+        _scores = _scores.gather(-1,ind).squeeze(-1).unsqueeze(0)
 
         return decoder_out._replace(
             output_tokens=_tokens,
@@ -121,22 +114,21 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
             history=history,
         )
 
-    #    a smpledscoreidx = sampled_score.squeeze(-1)
+        print("_tokens size ",_tokens.size())
+        print("_scores size ",_scores.size())
 
-    #     _tokens.gather(-1,sampledscoreidx).unsqueeze(-1)
-    #     _score.gather(-1,sampledscoreidx).squaze(-1)
-    #     _tokens = _tokens.squeeze(-1)
+        output_tokens.masked_scatter_(output_masks, _tokens[output_masks])
+        output_scores.masked_scatter_(output_masks, _scores[output_masks])
 
-
-        # output_tokens.masked_scatter_(output_masks, _tokens[output_masks])
-        # output_scores.masked_scatter_(output_masks, _scores[output_masks])
+        print("output tokens size ", output_tokens.size())
+        print("output scores size ", output_scores.size())
 
         if history is not None:
             history.append(output_tokens.clone())
 
         # skeptical decoding (depend on the maximum decoding steps.)
         if (step + 1) < max_step:
-            skeptical_mask = self._skeptical_unmasking(
+            skeptical_mask = _skeptical_unmasking(
                 output_scores, output_tokens.ne(self.pad), 1 - (step + 1) / max_step
             )
 

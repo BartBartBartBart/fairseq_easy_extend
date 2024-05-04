@@ -207,10 +207,12 @@ class IterativeRefinementGenerator(object):
                 step=step,
                 max_step=self.max_iter + 1,
             )
-
             decoder_out = model.forward_decoder(
                 prev_decoder_out, encoder_out, **decoder_options
             )
+            print(f"decoder_out.output_tokens.size() {decoder_out.output_tokens.size()}")
+            for i in range(2):
+                print(f"{model.decoder.dictionary.string(decoder_out.output_tokens[:,:,i])}\n" )
 
             if self.adaptive:
                 # terminate if there is a loop
