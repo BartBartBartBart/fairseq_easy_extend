@@ -184,4 +184,5 @@ def build_iterative_generator(self, models, args, **unused):
         decoding_format=getattr(args, "decoding_format", None),
         adaptive=not getattr(args, "iter_decode_force_max_iter", False),
         retain_history=getattr(args, "retain_iter_history", False),
+        temp=getattr(args, "temp", 1.2),
     )

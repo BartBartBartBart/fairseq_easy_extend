@@ -354,6 +354,8 @@ def add_eval_lm_args(parser):
 
 def add_generation_args(parser):
     group = parser.add_argument_group("Generation")
+    group.add_argument("--temp", type=float, default=1.2,
+                         help="temperature for generation")
     add_common_eval_args(group)
     gen_parser_from_dataclass(group, GenerationConfig())
     return group

@@ -9,6 +9,8 @@ import numpy as np
 import torch
 from fairseq import utils
 
+from typing import List, Dict
+from torch import Tensor
 
 DecoderOut = namedtuple(
     "IterativeRefinementDecoderOut",
@@ -30,6 +32,7 @@ class IterativeRefinementGenerator(object):
         adaptive=True,
         retain_history=False,
         reranking=False,
+        temp=1.2
     ):
         """
         Generates translations based on iterative refinement.
@@ -58,6 +61,7 @@ class IterativeRefinementGenerator(object):
         self.retain_history = retain_history
         self.adaptive = adaptive
         self.models = models
+        self.temp = temp
 
     def generate_batched_itr(
         self,
@@ -196,119 +200,130 @@ class IterativeRefinementGenerator(object):
                 "alignment": alignment,
             }
 
-        for step in range(self.max_iter + 1):
+        final_hyps = []
+        num_hyps = 5
+        for _ in range(num_hyps):
 
-            decoder_options = {
-                "eos_penalty": self.eos_penalty,
-                "max_ratio": self.max_ratio,
-                "decoding_format": self.decoding_format,
-            }
-            prev_decoder_out = prev_decoder_out._replace(
-                step=step,
-                max_step=self.max_iter + 1,
-            )
-            decoder_out = model.forward_decoder(
-                prev_decoder_out, encoder_out, **decoder_options
-            )
-            print(f"decoder_out.output_tokens.size() {decoder_out.output_tokens.size()}")
-            for i in range(2):
-                print(f"{model.decoder.dictionary.string(decoder_out.output_tokens[:,:,i])}\n" )
+            for step in range(self.max_iter + 1):
 
-            if self.adaptive:
-                # terminate if there is a loop
-                terminated, out_tokens, out_scores, out_attn = is_a_loop(
-                    prev_output_tokens,
-                    decoder_out.output_tokens,
-                    decoder_out.output_scores,
-                    decoder_out.attn,
+                decoder_options = {
+                    "eos_penalty": self.eos_penalty,
+                    "max_ratio": self.max_ratio,
+                    "decoding_format": self.decoding_format,
+                    "temp": self.temp,
+                }
+                prev_decoder_out = prev_decoder_out._replace(
+                    step=step,
+                    max_step=self.max_iter + 1,
                 )
-                decoder_out = decoder_out._replace(
-                    output_tokens=out_tokens,
-                    output_scores=out_scores,
-                    attn=out_attn,
+                decoder_out = model.forward_decoder(
+                    prev_decoder_out, encoder_out, **decoder_options
                 )
 
-            else:
-                terminated = decoder_out.output_tokens.new_zeros(
-                    decoder_out.output_tokens.size(0)
-                ).bool()
-
-            if step == self.max_iter:  # reach last iteration, terminate
-                terminated.fill_(1)
-
-            # collect finalized sentences
-            finalized_idxs = sent_idxs[terminated.to(sent_idxs.device)]
-            finalized_tokens = decoder_out.output_tokens[terminated]
-            finalized_scores = decoder_out.output_scores[terminated]
-            finalized_attn = (
-                None
-                if (decoder_out.attn is None or decoder_out.attn.size(0) == 0)
-                else decoder_out.attn[terminated]
-            )
-
-            if self.retain_history:
-                finalized_history_tokens = [h[terminated] for h in decoder_out.history]
-
-            for i in range(finalized_idxs.size(0)):
-                finalized[finalized_idxs[i]] = [
-                    finalized_hypos(
-                        step,
-                        finalized_tokens[i],
-                        finalized_scores[i],
-                        None if finalized_attn is None else finalized_attn[i],
+                if self.adaptive:
+                    # terminate if there is a loop
+                    terminated, out_tokens, out_scores, out_attn = is_a_loop(
+                        prev_output_tokens,
+                        decoder_out.output_tokens,
+                        decoder_out.output_scores,
+                        decoder_out.attn,
                     )
-                ]
+                    decoder_out = decoder_out._replace(
+                        output_tokens=out_tokens,
+                        output_scores=out_scores,
+                        attn=out_attn,
+                    )
+
+                else:
+                    terminated = decoder_out.output_tokens.new_zeros(
+                        decoder_out.output_tokens.size(0)
+                    ).bool()
+
+                if step == self.max_iter:  # reach last iteration, terminate
+                    terminated.fill_(1)
+
+                # collect finalized sentences
+                finalized_idxs = sent_idxs[terminated.to(sent_idxs.device)]
+                finalized_tokens = decoder_out.output_tokens[terminated]
+                finalized_scores = decoder_out.output_scores[terminated]
+                finalized_attn = (
+                    None
+                    if (decoder_out.attn is None or decoder_out.attn.size(0) == 0)
+                    else decoder_out.attn[terminated]
+                )
 
                 if self.retain_history:
-                    finalized[finalized_idxs[i]][0]["history"] = []
-                    for j in range(len(finalized_history_tokens)):
-                        finalized[finalized_idxs[i]][0]["history"].append(
-                            finalized_hypos(
-                                step, finalized_history_tokens[j][i], None, None
-                            )
+                    finalized_history_tokens = [h[terminated] for h in decoder_out.history]
+
+                for i in range(finalized_idxs.size(0)):
+                    finalized[finalized_idxs[i]] = [
+                        finalized_hypos(
+                            step,
+                            finalized_tokens[i],
+                            finalized_scores[i],
+                            None if finalized_attn is None else finalized_attn[i],
                         )
+                    ]
 
-            # check if all terminated
-            if terminated.sum() == terminated.size(0):
-                break
+                    if self.retain_history:
+                        finalized[finalized_idxs[i]][0]["history"] = []
+                        for j in range(len(finalized_history_tokens)):
+                            finalized[finalized_idxs[i]][0]["history"].append(
+                                finalized_hypos(
+                                    step, finalized_history_tokens[j][i], None, None
+                                )
+                            )
 
-            # for next step
-            not_terminated = ~terminated
-            prev_decoder_out = decoder_out._replace(
-                output_tokens=decoder_out.output_tokens[not_terminated],
-                output_scores=decoder_out.output_scores[not_terminated],
-                attn=decoder_out.attn[not_terminated]
-                if (decoder_out.attn is not None and decoder_out.attn.size(0) > 0)
-                else None,
-                history=[h[not_terminated] for h in decoder_out.history]
-                if decoder_out.history is not None
-                else None,
-            )
-            encoder_out = model.encoder.reorder_encoder_out(
-                encoder_out, not_terminated.nonzero(as_tuple=False).squeeze()
-            )
-            sent_idxs = sent_idxs[not_terminated.to(sent_idxs.device)]
-            prev_output_tokens = prev_decoder_out.output_tokens.clone()
+                # check if all terminated
+                if terminated.sum() == terminated.size(0):
+                    break
 
-        if self.beam_size > 1:
-            if reranker is not None:
-                finalized = self.rerank(
-                    reranker, finalized, [src_tokens, src_lengths], self.beam_size
+                # for next step
+                not_terminated = ~terminated
+                prev_decoder_out = decoder_out._replace(
+                    output_tokens=decoder_out.output_tokens[not_terminated],
+                    output_scores=decoder_out.output_scores[not_terminated],
+                    attn=decoder_out.attn[not_terminated]
+                    if (decoder_out.attn is not None and decoder_out.attn.size(0) > 0)
+                    else None,
+                    history=[h[not_terminated] for h in decoder_out.history]
+                    if decoder_out.history is not None
+                    else None,
                 )
+                encoder_out = model.encoder.reorder_encoder_out(
+                    encoder_out, not_terminated.nonzero(as_tuple=False).squeeze()
+                )
+                sent_idxs = sent_idxs[not_terminated.to(sent_idxs.device)]
+                prev_output_tokens = prev_decoder_out.output_tokens.clone()
+
+            if self.beam_size > 1:
+                if reranker is not None:
+                    finalized = self.rerank(
+                        reranker, finalized, [src_tokens, src_lengths], self.beam_size
+                    )
 
             # aggregate information from length beam
-            finalized = [
-                finalized[
-                    np.argmax(
-                        [
-                            finalized[self.beam_size * i + j][0]["score"]
-                            for j in range(self.beam_size)
-                        ]
-                    )
-                    + self.beam_size * i
-                ]
-                for i in range(len(finalized) // self.beam_size)
-            ]
+            # finalized = [
+            #     finalized[
+            #         np.argmax(
+            #             [
+            #                 finalized[self.beam_size * i + j][0]["score"]
+            #                 for j in range(self.beam_size)
+            #             ]
+            #         )
+            #         + self.beam_size * i
+            #     ]
+            #     for i in range(len(finalized) // self.beam_size)
+            # ]
+        
+            finalized = [[f[0] for f in finalized]]
+            final_hyps.extend(finalized)
+        print("==========FINALIZED==========")
+        for hyps in final_hyps:
+            for hyp in hyps:
+                print(model.decoder.dictionary.string(hyp["tokens"]), hyp["score"])
+                print("\n")
+        print("=============================")
 
         return finalized
 

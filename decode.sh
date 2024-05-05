@@ -5,4 +5,5 @@ python3 decode_interactive.py drive/fairseq-data-roen \
 --iter-decode-max-iter 9 \
 --iter-decode-eos-penalty 0 \
 --path drive/cmlm_checkpoint_best.pt \
---input drive/newstest2016.tok.tc.spm.ro
+--input drive/newstest2016.tok.tc.spm.ro \
+--temp 1.3 \

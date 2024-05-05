@@ -80,7 +80,7 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
         model = super().build_model(cfg, task)
         return model
     
-    def forward_decoder(self, decoder_out, encoder_out, temperature=1.2, decoding_format=None, **kwargs):
+    def forward_decoder(self, decoder_out, encoder_out, decoding_format=None, **kwargs):
 
         step = decoder_out.step
         max_step = decoder_out.max_step
@@ -99,29 +99,20 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
 
         # Apply softmax with temp to get probabilities, 1x10x27612
         # [batch size, number of tokens, vocab size] -> [1, 10, 27612]
-        _scores =  torch.nn.functional.softmax(_scores.squeeze()/temperature,dim=-1)
+        _scores =  torch.nn.functional.softmax(_scores.squeeze()/kwargs["temp"],dim=-1)
 
-        # Sample 100 probabilities from the output
-        # [batch size, number of tokens, vocab size] -> [1, 10, 100]
-        ind = torch.multinomial(input=_scores,num_samples=100)
-        _tokens = ind.unsqueeze(0)
-        _scores = _scores.gather(-1,ind).squeeze(-1).unsqueeze(0)
+        # Sample 1 index from the output
+        # [batch size, number of tokens, nu_samples] -> [1, 10, 1]
+        _tokens = torch.multinomial(input=_scores,num_samples=100)
+        _tokens = _tokens.unsqueeze(0)
+        _scores = _scores.unsqueeze(0)
 
-        return decoder_out._replace(
-            output_tokens=_tokens,
-            output_scores=_scores,
-            attn=None,
-            history=history,
-        )
-
-        print("_tokens size ",_tokens.size())
-        print("_scores size ",_scores.size())
-
+        # Get the scores of the sampled tokens
+        _scores = _scores.gather(-1,_tokens).squeeze(-1)
+        _tokens = _tokens.squeeze(-1)
+    
         output_tokens.masked_scatter_(output_masks, _tokens[output_masks])
         output_scores.masked_scatter_(output_masks, _scores[output_masks])
-
-        print("output tokens size ", output_tokens.size())
-        print("output scores size ", output_scores.size())
 
         if history is not None:
             history.append(output_tokens.clone())
