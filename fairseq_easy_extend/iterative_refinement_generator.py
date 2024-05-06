@@ -201,7 +201,7 @@ class IterativeRefinementGenerator(object):
             }
 
         final_hyps = []
-        num_hyps = 5
+        num_hyps = 100
         for _ in range(num_hyps):
 
             for step in range(self.max_iter + 1):
@@ -315,14 +315,17 @@ class IterativeRefinementGenerator(object):
             #     ]
             #     for i in range(len(finalized) // self.beam_size)
             # ]
-        
             finalized = [[f[0] for f in finalized]]
             final_hyps.extend(finalized)
         print("==========FINALIZED==========")
-        for hyps in final_hyps:
-            for hyp in hyps:
-                print(model.decoder.dictionary.string(hyp["tokens"]), hyp["score"])
-                print("\n")
+        with open("NAR_hyp_file.txt", "a") as f:
+            with open("NAR_score_file.txt", "a") as f2:
+                for hyps in final_hyps:
+                    for hyp in hyps:
+                        # print(model.decoder.dictionary.string(hyp["tokens"]), hyp["score"].item())
+                        # print("\n")
+                        f.write(model.decoder.dictionary.string(hyp["tokens"]) + "\n")
+                        f2.write(str(hyp["score"].item()) + "\n")
         print("=============================")
 
         return finalized
