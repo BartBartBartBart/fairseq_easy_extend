@@ -97,13 +97,22 @@ class BaseCMLMNATransformerModel(CMLMNATransformerModel):
             encoder_out=encoder_out,
         )
 
-        # Apply softmax with temp to get probabilities, 1x10x27612
-        # [batch size, number of tokens, vocab size] -> [1, 10, 27612]
+        # Decoder returns logits of shape:
+        # [batch size, number of tokens, vocab size]
+        # Softmax returns scores of shape:
+        # [number of tokens, vocab size]
         _scores =  torch.nn.functional.softmax(_scores.squeeze()/kwargs["temp"],dim=-1)
 
-        # Sample 1 index from the output
-        # [batch size, number of tokens, nu_samples] -> [1, 10, 1]
-        _tokens = torch.multinomial(input=_scores,num_samples=100)
+        # We don't want unk and pad tokens to be selected, so set prob to 0
+        _scores[:, self.unk] = 0
+        _scores[:, self.pad] = 0
+
+        # For each token, sample, sample 1 token from the output with multinomial sampling
+        # Multinomial sampling returns the index of the sampled token
+        # [numer of tokens, number of samples]
+        _tokens = torch.multinomial(input=_scores,num_samples=1)
+
+        # Rest of code expects [batch_size, number of tokens], so unsqueeze
         _tokens = _tokens.unsqueeze(0)
         _scores = _scores.unsqueeze(0)
 

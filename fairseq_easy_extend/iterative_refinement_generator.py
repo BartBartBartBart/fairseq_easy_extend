@@ -200,6 +200,7 @@ class IterativeRefinementGenerator(object):
                 "alignment": alignment,
             }
 
+        # We want to generate 100 hypotheses for each sentence
         final_hyps = []
         num_hyps = 100
         for _ in range(num_hyps):
@@ -317,6 +318,8 @@ class IterativeRefinementGenerator(object):
             # ]
             finalized = [[f[0] for f in finalized]]
             final_hyps.extend(finalized)
+
+        # Write final hypotheses to file to perform MBR decoding
         print("==========FINALIZED==========")
         with open("NAR_hyp_file.txt", "a") as f:
             with open("NAR_score_file.txt", "a") as f2:
@@ -326,6 +329,10 @@ class IterativeRefinementGenerator(object):
                         # print("\n")
                         f.write(model.decoder.dictionary.string(hyp["tokens"]) + "\n")
                         f2.write(str(hyp["score"].item()) + "\n")
+                        # if self.unk in hyp["tokens"]:
+                        #     print("UNK detected")
+                        #     print(model.decoder.dictionary.string(hyp["tokens"]), hyp["score"].item())
+                        #     print("\n")
         print("=============================")
 
         return finalized
